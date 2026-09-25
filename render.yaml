@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: esp32-iot-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: NODE_ENV
+        value: production
+      - key: API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false

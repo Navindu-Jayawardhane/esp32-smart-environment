@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ESP32-C3 IoT Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="./config.js"></script>
+  <style>
+    :root { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: dark; background:#07111f; color:#eef5ff; }
+    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at top right,#132b46 0,#07111f 45%,#050a12 100%);min-height:100vh}
+    .wrap{max-width:1240px;margin:auto;padding:30px}.top{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:24px}
+    h1{margin:0;font-size:31px;letter-spacing:-.5px}.sub{color:#91a4bb;margin-top:6px}.status{padding:9px 13px;border:1px solid #28415d;border-radius:999px;font-size:13px;background:#0c1a2a}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:7px}
+    .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}.card,.chart{background:rgba(10,24,40,.88);border:1px solid #233a53;border-radius:18px;box-shadow:0 15px 45px rgba(0,0,0,.22)}
+    .card{padding:19px}.label{font-size:13px;color:#91a4bb}.value{font-size:29px;font-weight:750;margin-top:9px}.unit{font-size:14px;color:#91a4bb}.time{color:#667d96;font-size:12px;margin-top:8px}
+    .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}.chart{padding:18px;min-height:340px}.chart h2{font-size:16px;margin:0 0 12px}.chartbox{height:275px}
+    .footer{margin-top:18px;color:#667d96;font-size:12px}.error{color:#fca5a5}.ok{color:#86efac}
+    @media(max-width:950px){.grid{grid-template-columns:repeat(2,1fr)}.charts{grid-template-columns:1fr}} @media(max-width:560px){.wrap{padding:16px}.grid{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>ESP32-C3 IoT Monitor</h1><div class="sub">AHT10 · BMP180 · Soil Moisture</div></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+  </div>
+  <div class="grid">
+    <div class="card"><div class="label">AHT10 Temperature</div><div class="value" id="ahtTemp">--</div><div class="unit">°C</div></div>
+    <div class="card"><div class="label">Humidity</div><div class="value" id="humidity">--</div><div class="unit">%</div></div>
+    <div class="card"><div class="label">BMP180 Temperature</div><div class="value" id="bmpTemp">--</div><div class="unit">°C</div></div>
+    <div class="card"><div class="label">Pressure</div><div class="value" id="pressure">--</div><div class="unit">hPa</div></div>
+    <div class="card"><div class="label">Soil Moisture</div><div class="value" id="soil">--</div><div class="unit">%</div><div class="time" id="lastSeen">No reading</div></div>
+  </div>
+  <div class="charts">
+    <div class="chart"><h2>Temperature</h2><div class="chartbox"><canvas id="tempChart"></canvas></div></div>
+    <div class="chart"><h2>Humidity</h2><div class="chartbox"><canvas id="humidityChart"></canvas></div></div>
+    <div class="chart"><h2>Pressure</h2><div class="chartbox"><canvas id="pressureChart"></canvas></div></div>
+    <div class="chart"><h2>Soil Moisture</h2><div class="chartbox"><canvas id="soilChart"></canvas></div></div>
+  </div>
+  <div class="footer">Device: <b id="deviceLabel"></b> · Refresh: 5 seconds · API: <span id="apiLabel"></span></div>
+</div>
+<script>
+const cfg = window.IOT_CONFIG || {};
+const API_BASE = String(cfg.API_BASE || '').replace(/\/$/, '');
+const device = cfg.DEVICE_ID || 'esp32-c3-01';
+const charts = {};
+const $ = id => document.getElementById(id);
+$('deviceLabel').textContent = device;
+$('apiLabel').textContent = API_BASE || 'not configured';
+const common = {responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},scales:{x:{ticks:{color:'#91a4bb'},grid:{color:'#233a53'}},y:{ticks:{color:'#91a4bb'},grid:{color:'#233a53'}}},plugins:{legend:{labels:{color:'#eef5ff'}}}};
+function makeChart(id,label){charts[id]=new Chart($(id),{type:'line',data:{labels:[],datasets:[{label,data:[],tension:.28,pointRadius:2,borderWidth:2}]},options:common});}
+makeChart('tempChart','AHT10 Temperature (°C)'); makeChart('humidityChart','Humidity (%)'); makeChart('pressureChart','Pressure (hPa)'); makeChart('soilChart','Soil Moisture (%)');
+function fmtTime(s){return new Date(s).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function setStatus(text, good){$('status').textContent=text; $('dot').style.background=good?'#22c55e':'#f59e0b';}
+async function load(){
+  if (!API_BASE || API_BASE.includes('YOUR-IOT-API')) { setStatus('Set API URL in config.js', false); return; }
+  try {
+    const r = await fetch(`${API_BASE}/api/readings?device=${encodeURIComponent(device)}&limit=100`, {cache:'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const rows = await r.json();
+    if (!rows.length) throw new Error('No readings yet');
+    const latest = rows[rows.length-1];
+    $('ahtTemp').textContent=Number(latest.aht_temperature).toFixed(1);
+    $('humidity').textContent=Number(latest.humidity).toFixed(1);
+    $('bmpTemp').textContent=Number(latest.bmp_temperature).toFixed(1);
+    $('pressure').textContent=Number(latest.pressure).toFixed(1);
+    $('soil').textContent=Number(latest.soil_moisture).toFixed(1);
+    $('lastSeen').textContent='Last: '+fmtTime(latest.timestamp);
+    setStatus('Live', true);
+    const labels=rows.map(x=>fmtTime(x.timestamp));
+    const sets=[['tempChart',rows.map(x=>x.aht_temperature)],['humidityChart',rows.map(x=>x.humidity)],['pressureChart',rows.map(x=>x.pressure)],['soilChart',rows.map(x=>x.soil_moisture)]];
+    sets.forEach(([id,data])=>{charts[id].data.labels=labels;charts[id].data.datasets[0].data=data;charts[id].update();});
+  } catch(e) { console.error(e); setStatus('API unavailable / waiting for data', false); }
+}
+load(); setInterval(load,5000);
+</script>
+</body></html>
